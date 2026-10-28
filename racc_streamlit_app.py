@@ -100,7 +100,7 @@ def main():
     page = st.sidebar.radio('Analysis', ['1. Upload and cleaning', '2. Statistics and EDA',
         '3. Classification and prediction', '4. Forecasting and downloads',
         '5. K-Means clustering', '6. Accident hotspot analysis',
-        '10. Accident hotspot mapping'], key='analysis_page')
+        '7. Decision-making support', '8. Accident hotspot mapping'], key='analysis_page')
     if upload is None:
         st.session_state.pop('racc_bundle', None)
         st.info('Upload RACC.csv using the left panel.')
@@ -222,8 +222,64 @@ def main():
             st.warning('Barangay counts are not road-segment hotspots. Road-name/segment extraction, verified coordinates, and traffic exposure are needed for AH26 versus municipal/barangay-road comparisons.')
 
 
-    elif page.startswith('10.'):
-        st.header('10. Accident hotspot mapping')
+    elif page.startswith('7.'):
+        st.header('7. Decision-making support')
+        st.write('This module turns the currently uploaded records into a transparent screening list for discussion by local road-safety personnel. It supports prioritization, not automatic enforcement or engineering decisions.')
+        st.caption('Scores are relative to the filtered dataset and depend on record completeness. They are not crash probabilities, causal effects, or exposure-adjusted risk rates.')
+
+        decision = d.copy()
+        decision['area'] = decision['area'].fillna('Unknown').astype(str).str.strip()
+        decision['severity_text'] = decision['severity'].fillna('').astype(str).str.casefold()
+        decision['is_fatal'] = decision['severity_text'].str.contains(r'\bfatal\b', regex=True).astype(int)
+        decision['is_severe'] = decision['severity_text'].str.contains(r'major injury|serious injury|severe injury|\bfatal\b', regex=True).astype(int)
+        decision['is_unknown_severity'] = decision['severity'].isna().astype(int)
+
+        decision_summary = decision.groupby('area', dropna=False).agg(
+            reported_records=('area', 'size'),
+            severe_or_fatal_records=('is_severe', 'sum'),
+            fatal_records=('is_fatal', 'sum'),
+            unknown_severity_records=('is_unknown_severity', 'sum'),
+        ).reset_index()
+        if decision_summary.empty:
+            st.info('No area-level records are available for decision support.')
+        else:
+            max_records = max(int(decision_summary['reported_records'].max()), 1)
+            max_severe = max(int(decision_summary['severe_or_fatal_records'].max()), 1)
+            decision_summary['screening_score'] = 100 * (
+                0.60 * decision_summary['reported_records'] / max_records +
+                0.40 * decision_summary['severe_or_fatal_records'] / max_severe
+            )
+            decision_summary['suggested_review_level'] = pd.cut(
+                decision_summary['screening_score'],
+                bins=[-0.01, 25, 50, 75, 100.01],
+                labels=['Routine review', 'Monitor', 'High-priority review', 'Urgent review'],
+            ).astype(str)
+            decision_summary = decision_summary.sort_values(
+                ['screening_score', 'reported_records'], ascending=False
+            ).reset_index(drop=True)
+            a, b, c = st.columns(3)
+            a.metric('Areas assessed', len(decision_summary))
+            b.metric('Reported records', len(decision))
+            c.metric('Severe/fatal labels', int(decision_summary['severe_or_fatal_records'].sum()))
+            st.subheader('Area review priorities')
+            st.dataframe(decision_summary, use_container_width=True)
+            st.bar_chart(decision_summary.head(15).set_index('area')['screening_score'])
+            csv_bytes = decision_summary.to_csv(index=False).encode('utf-8-sig')
+            st.download_button('Download decision-support priorities', csv_bytes,
+                               file_name='Bunawan_Decision_Support_Priorities.csv',
+                               mime='text/csv', key='download_decision_support')
+
+            st.subheader('Suggested follow-up actions')
+            st.markdown('''
+- **Urgent review / High-priority review:** validate the records, check whether repeated reports refer to the same event, and arrange a site inspection by authorized road-safety or engineering personnel.
+- **Monitor:** review the contributing record details and compare with newer records before changing priorities.
+- **Routine review:** continue data-quality checks and reassess when more records become available.
+- **For every area:** verify coordinates, traffic exposure, road ownership, and on-site conditions before selecting an intervention.
+''')
+            st.warning('Do not treat the ranking as proof that an area is dangerous or that weather, road condition, or a recorded cause caused an accident. Confirm findings with source records and field assessment.')
+
+    elif page.startswith('8.'):
+        st.header('8. Accident hotspot mapping')
         st.caption('Upload a verified coordinate lookup for recorded locations. Coordinates represent lookup points, not necessarily exact crash sites.')
         st.write('Required lookup CSV columns: LOCATION CLEAN, LATITUDE, LONGITUDE.')
         geo_upload = st.file_uploader('Upload location coordinates CSV', type=['csv'], key='hotspot_coordinates')
