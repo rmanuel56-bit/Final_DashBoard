@@ -52,15 +52,14 @@ print("=" * 60)
 print("1. UPLOAD ROAD ACCIDENT DATASET")
 print("=" * 60)
 
-uploaded = files.upload()
-
-csv_name = next(
-    (n for n in uploaded if n.lower().endswith('.csv')),
-    None
+uploaded_file = st.file_uploader(
+    "Upload accident CSV file",
+    type=["csv"]
 )
 
-if not csv_name:
-    raise ValueError("Please upload your RACC CSV file.")
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    st.success("CSV uploaded successfully!")
 
 raw = pd.read_csv(csv_name, encoding='utf-8-sig')
 df = raw.copy()
