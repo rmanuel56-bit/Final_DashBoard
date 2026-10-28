@@ -6,7 +6,6 @@
 # Streamlit Dashboard
 # ============================================================
 
-!pip -q install folium mlxtend streamlit plotly
 
 import os
 import re
