@@ -95,14 +95,13 @@ else:
     st.info("Please upload your road accident CSV file to continue.")
 
 
+
 # ============================================================
 # 2. DATA CLEANING AND PREPROCESSING
 # ============================================================
 
-print("\n" + "=" * 60)
-print("2. DATA CLEANING AND PREPROCESSING")
-print("=" * 60)
-
+st.divider()
+st.header("2. DATA CLEANING AND PREPROCESSING")
 
 def clean_text(x):
     if pd.isna(x):
@@ -220,36 +219,63 @@ def normalize_location(x):
 
 df['LOCATION CLEAN'] = df['LOCATION'].map(normalize_location)
 
-print(
-    "Unparseable dates:",
-    int((df['DATE'].notna() & df['DATE PARSED'].isna()).sum())
+# Display date and time parsing issues
+unparseable_dates = int(
+    (df['DATE'].notna() & df['DATE PARSED'].isna()).sum()
 )
 
-print(
-    "Unparseable times:",
-    int((df['TIME'].notna() & df['TIME PARSED'].isna()).sum())
+unparseable_times = int(
+    (df['TIME'].notna() & df['TIME PARSED'].isna()).sum()
 )
 
-print("\nMissing values in original required columns:")
-display(
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric("Unparseable Dates", unparseable_dates)
+
+with col2:
+    st.metric("Unparseable Times", unparseable_times)
+
+# Missing values report
+st.subheader("Missing Values in Required Columns")
+
+missing_summary = (
     df[required]
     .isna()
     .sum()
-    .rename('Missing Values')
+    .rename("Missing Values")
     .to_frame()
 )
 
+st.dataframe(missing_summary, use_container_width=True)
+
+# Date range
 if df['DATE PARSED'].notna().any():
-    print(
-        "Date range:",
-        df['DATE PARSED'].min(),
+    st.write(
+        "**Date range:**",
+        df['DATE PARSED'].min().strftime("%Y-%m-%d"),
         "to",
-        df['DATE PARSED'].max()
+        df['DATE PARSED'].max().strftime("%Y-%m-%d")
     )
+else:
+    st.warning("No valid dates were found in the dataset.")
 
-df.to_csv('RACC_cleaned_audit.csv', index=False)
+# Preview cleaned data
+st.subheader("Cleaned Dataset Preview")
+st.dataframe(df.head(10), use_container_width=True)
 
-print("Cleaned dataset saved: RACC_cleaned_audit.csv")
+# Download cleaned dataset
+cleaned_csv = df.to_csv(index=False).encode("utf-8-sig")
+
+st.download_button(
+    label="Download Cleaned Dataset",
+    data=cleaned_csv,
+    file_name="RACC_cleaned_audit.csv",
+    mime="text/csv"
+)
+
+st.success("Data cleaning and preprocessing completed!")
+
 
 # ============================================================
 # 3. FILTER DATA AND EXPLORATORY DATA ANALYSIS
