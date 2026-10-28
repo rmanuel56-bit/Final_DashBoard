@@ -224,16 +224,175 @@ def main():
 
     elif page.startswith('7.'):
         st.header('7. Decision-making support')
-        st.write('This module turns the currently uploaded records into a transparent screening list for discussion by local road-safety personnel. It supports prioritization, not automatic enforcement or engineering decisions.')
-        st.caption('Scores are relative to the filtered dataset and depend on record completeness. They are not crash probabilities, causal effects, or exposure-adjusted risk rates.')
+        st.write(
+            'Compare two or more recorded conditions and review practical safety actions. '
+            'Recommendations combine observed dataset patterns with general road-safety precautions; '
+            'they do not prove that a factor caused an accident.'
+        )
+        st.caption(
+            'All comparisons describe reported records only. Small groups and missing severity labels '
+            'can make percentages unstable. Verify records and inspect the actual site before decisions.'
+        )
 
+        # Interactive combination analysis: leave a selector empty to include every value.
+        factor_options = {
+            'Weather': 'weather',
+            'Road condition': 'road_condition',
+            'Vehicle type': 'vehicle',
+            'Recorded cause': 'cause',
+            'Area / location': 'area',
+        }
+        chosen_factors = st.multiselect(
+            'Choose at least two factors to compare',
+            options=list(factor_options.keys()),
+            default=['Weather', 'Road condition'],
+            key='decision_factors',
+        )
+        selected_values = {}
+        for label in chosen_factors:
+            col = factor_options[label]
+            if col not in d.columns:
+                st.warning(f'The dataset does not contain the expected field for {label}: {col}.')
+                continue
+            values = sorted(d[col].dropna().astype(str).unique().tolist())
+            selected_values[col] = st.multiselect(
+                f'Filter {label.lower()} (leave empty for all)',
+                options=values,
+                default=[],
+                key='decision_filter_' + col,
+            )
+
+        subset = d.copy()
+        for col, values in selected_values.items():
+            if values:
+                subset = subset[subset[col].astype(str).isin(values)]
+        st.subheader('Observed combination')
+        a, b, c = st.columns(3)
+        a.metric('Matching records', len(subset))
+        severity_text = subset['severity'].fillna('').astype(str).str.casefold()
+        severe_mask = severity_text.str.contains(
+            r'major injury|serious injury|severe injury|\\bfatal\\b', regex=True
+        )
+        b.metric('Severe/fatal labels', int(severe_mask.sum()))
+        b_rate = (100 * severe_mask.mean()) if len(subset) else 0.0
+        c.metric('Severe/fatal share', f'{b_rate:.1f}%' if len(subset) else 'N/A')
+
+        # Compare the selected subset with the full dataset, using only known severity labels.
+        all_severity = d['severity'].fillna('').astype(str).str.casefold()
+        all_known = all_severity.str.strip().ne('')
+        subset_known = severity_text.str.strip().ne('')
+        overall_severe_rate = (
+            100 * all_severity[all_known].str.contains(
+                r'major injury|serious injury|severe injury|\\bfatal\\b', regex=True
+            ).mean()
+        ) if all_known.any() else np.nan
+        subset_severe_rate = (
+            100 * severity_text[subset_known].str.contains(
+                r'major injury|serious injury|severe injury|\\bfatal\\b', regex=True
+            ).mean()
+        ) if subset_known.any() else np.nan
+        if pd.notna(subset_severe_rate) and pd.notna(overall_severe_rate):
+            st.write(f'Known-severity severe/fatal share in selected records: **{subset_severe_rate:.1f}%**')
+            st.write(f'Known-severity severe/fatal share across all records: **{overall_severe_rate:.1f}%**')
+            st.write(f'Difference: **{subset_severe_rate - overall_severe_rate:+.1f} percentage points**')
+        else:
+            st.info('There are not enough known severity labels to compare severe/fatal shares.')
+
+        if len(chosen_factors) < 2:
+            st.info('Choose at least two factors above to make a multi-factor comparison.')
+        elif len(subset) == 0:
+            st.warning('No records match these selections. Clear one or more filters and try again.')
+        else:
+            st.subheader('Combination details')
+            display_cols = [factor_options[x] for x in chosen_factors if factor_options[x] in subset.columns]
+            display_cols = list(dict.fromkeys(display_cols + ['severity']))
+            st.dataframe(subset[display_cols].head(200), use_container_width=True)
+            if len(subset) > 200:
+                st.caption('Showing the first 200 matching records; summary metrics use all matching records.')
+
+        st.subheader('Recommended actions based on the selected conditions')
+        recommendation_items = []
+        selected_weather = ' '.join(selected_values.get('weather', [])).casefold()
+        selected_road = ' '.join(selected_values.get('road_condition', [])).casefold()
+        selected_vehicle = ' '.join(selected_values.get('vehicle', [])).casefold()
+        selected_cause = ' '.join(selected_values.get('cause', [])).casefold()
+        if any(x in selected_weather for x in ['rain', 'storm', 'wet']):
+            recommendation_items.append((
+                'Rainy / stormy weather selected',
+                'Reduce speed, increase following distance, use headlights as appropriate, and avoid sudden braking or steering. Check tire tread and brake operation before travel.'
+            ))
+        if any(x in selected_road for x in ['mud', 'slipper', 'wet', 'flood', 'pothole', 'loose']):
+            recommendation_items.append((
+                'Potentially slippery or damaged road selected',
+                'Approach slowly and avoid abrupt braking, acceleration, or turning. Road personnel should inspect the surface, drainage, mud/silt buildup, and potholes; place warnings only where a hazard is confirmed.'
+            ))
+        if any(x in selected_vehicle for x in ['motorcycle', 'motor cycle', 'scooter']):
+            recommendation_items.append((
+                'Motorcycle selected',
+                'Check both brakes, tire condition and pressure, lights, and helmet fastening. On slippery roads, keep movements smooth, avoid sharp leaning, and increase stopping distance.'
+            ))
+        if any(x in selected_cause for x in ['brake', 'mechanical', 'tire', 'tyre']):
+            recommendation_items.append((
+                'Recorded cause mentions a vehicle/mechanical issue',
+                'Arrange a qualified vehicle inspection and check the relevant component before the vehicle returns to service. Treat the recorded cause as unverified until confirmed.'
+            ))
+        if subset_severe_rate is not None and pd.notna(subset_severe_rate) and pd.notna(overall_severe_rate) and subset_severe_rate > overall_severe_rate:
+            recommendation_items.append((
+                'Observed severe/fatal share is above the dataset-wide share',
+                'Validate the source records and review the combination with road-safety personnel. Check exposure and reporting completeness before allocating resources; the difference alone does not establish increased risk.'
+            ))
+        if subset['severity'].fillna('').astype(str).str.contains(r'(?i)\\bfatal\\b').any():
+            recommendation_items.append((
+                'Fatal label present in the selected records',
+                'Verify the incident record promptly and follow the responsible agency’s established review process. Consider a site assessment by qualified personnel; do not infer the cause from this dashboard alone.'
+            ))
+        if not recommendation_items:
+            recommendation_items.append((
+                'General precaution',
+                'Maintain vehicles in roadworthy condition, obey speed limits, use appropriate protective equipment, and verify local road conditions before recommending infrastructure changes.'
+            ))
+        for heading, advice in recommendation_items:
+            st.markdown(f'**{heading}**')
+            st.write(advice)
+
+        st.subheader('Compare combinations in the data')
+        if len(chosen_factors) >= 2:
+            group_cols = [factor_options[x] for x in chosen_factors if factor_options[x] in d.columns]
+            combo_data = d.copy()
+            for col, values in selected_values.items():
+                if values:
+                    combo_data = combo_data[combo_data[col].astype(str).isin(values)]
+            if group_cols and not combo_data.empty:
+                combo_data['_known_severity'] = combo_data['severity'].fillna('').astype(str).str.strip().ne('')
+                combo_data['_severe_fatal'] = combo_data['severity'].fillna('').astype(str).str.casefold().str.contains(
+                    r'major injury|serious injury|severe injury|\\bfatal\\b', regex=True
+                )
+                combo_table = combo_data.groupby(group_cols, dropna=False).agg(
+                    reported_records=('severity', 'size'),
+                    known_severity_records=('_known_severity', 'sum'),
+                    severe_fatal_records=('_severe_fatal', 'sum'),
+                ).reset_index()
+                combo_table['severe_fatal_share_pct'] = np.where(
+                    combo_table['known_severity_records'] > 0,
+                    100 * combo_table['severe_fatal_records'] / combo_table['known_severity_records'],
+                    np.nan,
+                )
+                combo_table = combo_table.sort_values(
+                    ['reported_records', 'severe_fatal_share_pct'], ascending=[False, False]
+                )
+                show_table('Factor-combination comparison', combo_table, 'decision_factor_combinations')
+            else:
+                st.info('No combinations are available for the current filters.')
+
+        st.subheader('Area review priorities')
         decision = d.copy()
         decision['area'] = decision['area'].fillna('Unknown').astype(str).str.strip()
         decision['severity_text'] = decision['severity'].fillna('').astype(str).str.casefold()
-        decision['is_fatal'] = decision['severity_text'].str.contains(r'\bfatal\b', regex=True).astype(int)
-        decision['is_severe'] = decision['severity_text'].str.contains(r'major injury|serious injury|severe injury|\bfatal\b', regex=True).astype(int)
+        decision['is_fatal'] = decision['severity_text'].str.contains(r'\\bfatal\\b', regex=True).astype(int)
+        decision['is_severe'] = decision['severity_text'].str.contains(
+            r'major injury|serious injury|severe injury|\\bfatal\\b', regex=True
+        ).astype(int)
         decision['is_unknown_severity'] = decision['severity'].isna().astype(int)
-
         decision_summary = decision.groupby('area', dropna=False).agg(
             reported_records=('area', 'size'),
             severe_or_fatal_records=('is_severe', 'sum'),
@@ -261,22 +420,12 @@ def main():
             a.metric('Areas assessed', len(decision_summary))
             b.metric('Reported records', len(decision))
             c.metric('Severe/fatal labels', int(decision_summary['severe_or_fatal_records'].sum()))
-            st.subheader('Area review priorities')
-            st.dataframe(decision_summary, use_container_width=True)
+            show_table('Area review priorities', decision_summary, 'decision_support_priorities')
             st.bar_chart(decision_summary.head(15).set_index('area')['screening_score'])
-            csv_bytes = decision_summary.to_csv(index=False).encode('utf-8-sig')
-            st.download_button('Download decision-support priorities', csv_bytes,
-                               file_name='Bunawan_Decision_Support_Priorities.csv',
-                               mime='text/csv', key='download_decision_support')
-
-            st.subheader('Suggested follow-up actions')
-            st.markdown('''
-- **Urgent review / High-priority review:** validate the records, check whether repeated reports refer to the same event, and arrange a site inspection by authorized road-safety or engineering personnel.
-- **Monitor:** review the contributing record details and compare with newer records before changing priorities.
-- **Routine review:** continue data-quality checks and reassess when more records become available.
-- **For every area:** verify coordinates, traffic exposure, road ownership, and on-site conditions before selecting an intervention.
-''')
-            st.warning('Do not treat the ranking as proof that an area is dangerous or that weather, road condition, or a recorded cause caused an accident. Confirm findings with source records and field assessment.')
+            st.warning(
+                'Scores are relative to this dataset, not risk probabilities. Verify duplicate reports, '
+                'traffic exposure, coordinates, and on-site conditions before taking action.'
+            )
 
     elif page.startswith('8.'):
         st.header('8. Accident hotspot mapping')
