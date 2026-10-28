@@ -17,8 +17,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import folium
 
-from folium.plugins import HeatMap
-from google.colab import files
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
