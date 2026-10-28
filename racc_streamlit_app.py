@@ -36,21 +36,13 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay
 )
 
-from mlxtend.preprocessing import TransactionEncoder
-from mlxtend.frequent_patterns import apriori, association_rules
 
-RANDOM_STATE = 42
+import streamlit as st
+import pandas as pd
 
-pd.set_option('display.max_columns', 100)
-sns.set_theme()
-
-# ============================================================
-# 1. UPLOAD AND LOAD DATASET
-# ============================================================
-
-print("=" * 60)
-print("1. UPLOAD ROAD ACCIDENT DATASET")
-print("=" * 60)
+st.write("=" * 60)
+st.write("1. UPLOAD ROAD ACCIDENT DATASET")
+st.write("=" * 60)
 
 uploaded_file = st.file_uploader(
     "Upload accident CSV file",
@@ -58,36 +50,50 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.success("CSV uploaded successfully!")
+    try:
+        # Read the uploaded CSV file
+        raw = pd.read_csv(uploaded_file, encoding="utf-8-sig")
+        df = raw.copy()
 
-raw = pd.read_csv(csv_name, encoding='utf-8-sig')
-df = raw.copy()
+        # Standardize column names
+        df.columns = [
+            str(c).strip().upper().replace("_", " ")
+            for c in df.columns
+        ]
 
-df.columns = [
-    str(c).strip().upper().replace('_', ' ')
-    for c in df.columns
-]
+        # Required columns
+        required = [
+            "DATE", "TIME", "LOCATION", "WEATHER",
+            "ROAD CONDITION", "VEHICLE TYPE",
+            "CAUSE", "SEVERITY", "GENDER"
+        ]
 
-required = [
-    'DATE', 'TIME', 'LOCATION', 'WEATHER',
-    'ROAD CONDITION', 'VEHICLE TYPE',
-    'CAUSE', 'SEVERITY', 'GENDER'
-]
+        # Check missing required columns
+        missing = [c for c in required if c not in df.columns]
 
-missing = [c for c in required if c not in df.columns]
+        if missing:
+            st.error(f"Missing required columns: {missing}")
+            st.write("Available columns:", df.columns.tolist())
 
-if missing:
-    raise ValueError(
-        f"Missing columns: {missing}. "
-        f"Available columns: {df.columns.tolist()}"
-    )
+        else:
+            st.success("CSV uploaded successfully!")
 
-print("Total records:", len(df))
-print("Total columns:", len(raw.columns))
-print("Exact duplicate source rows:", int(raw.duplicated().sum()))
+            st.write("**Total records:**", len(df))
+            st.write("**Total columns:**", len(raw.columns))
+            st.write(
+                "**Exact duplicate source rows:**",
+                int(raw.duplicated().sum())
+            )
 
-display(df.head())
+            st.subheader("Dataset Preview")
+            st.dataframe(df.head(), use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Unable to read the CSV file: {e}")
+
+else:
+    st.info("Please upload your road accident CSV file to continue.")
+
 
 # ============================================================
 # 2. DATA CLEANING AND PREPROCESSING
